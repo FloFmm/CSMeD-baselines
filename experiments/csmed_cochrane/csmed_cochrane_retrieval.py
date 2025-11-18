@@ -8,8 +8,13 @@ import torch
 from numba import njit
 from retriv import SparseRetriever, DenseRetriever
 
-from csmed.datasets.datasets.csmed_cochrane.csmed_cochrane import CSMeDCochrane
-from experiments.csmed_cochrane.measures import evaluate_runs
+
+import sys
+import os
+# Add path to the parent repo (systematic-review-datasets)
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..", "../systematic-review-datasets")))
+from csmed.csmed.csmed_cochrane import CSMeDCochrane
+from csmed.experiments.measures import evaluate_runs
 
 # Constants
 SEED = 42
@@ -19,7 +24,8 @@ USE_GPU = True
 torch.manual_seed(SEED)
 random.seed(SEED)
 np.random.seed(SEED)
-
+os.environ["RETRIV_BASE_PATH"] = "../systematic-review-datasets/data/indexes"
+os.environ["HF_HOME"] = "../systematic-review-datasets/data/huggingface"
 
 @njit
 def set_seed(value):
@@ -28,7 +34,8 @@ def set_seed(value):
 
 def load_dataset():
     return CSMeDCochrane().load_dataset(
-        base_path="../../csmed/datasets/datasets/csmed_cochrane/"
+        # base_path="../../csmed/datasets/datasets/csmed_cochrane/"
+        base_path="../systematic-review-datasets/csmed/csmed_cochrane"
     )
 
 
@@ -130,6 +137,7 @@ if __name__ == "__main__":
     set_seed(SEED)
 
     dataset = load_dataset()
+
     eval_reviews = dataset["EVAL"]
 
     outfile_path = "../../reports/title_and_abstract/"
@@ -150,21 +158,21 @@ if __name__ == "__main__":
         #     "model": "sentence-transformers/all-MiniLM-L6-v2",
         #     "max_length": 128,
         # },
-        "MiniLM-256": {
-            "type": "dense",
-            "model": "sentence-transformers/all-MiniLM-L6-v2",
-            "max_length": 256,
-        },
+        # "MiniLM-256": {
+        #     "type": "dense",
+        #     "model": "sentence-transformers/all-MiniLM-L6-v2",
+        #     "max_length": 256,
+        # },
         # "qa-MiniLM-512": {
         #     "type": "dense",
         #     "model": "sentence-transformers/multi-qa-MiniLM-L6-cos-v1",
         #     "max_length": 512,
         # },
-        "mpnet": {
-            "type": "dense",
-            "model": "sentence-transformers/all-mpnet-base-v2",
-            "max_length": 512,
-        },
+        # "mpnet": {
+        #     "type": "dense",
+        #     "model": "sentence-transformers/all-mpnet-base-v2",
+        #     "max_length": 512,
+        # },
         # "nli-mpnet": {
         #     "type": "dense",
         #     "model": "sentence-transformers/nli-mpnet-base-v2",
@@ -180,11 +188,11 @@ if __name__ == "__main__":
             "model": "pritamdeka/S-BioBert-snli-multinli-stsb",
             "max_length": 512,
         },
-        "pubmedbert": {
-            "type": "dense",
-            "model": "pritamdeka/S-PubMedBert-MS-MARCO",
-            "max_length": 512,
-        },
+        # "pubmedbert": {
+        #     "type": "dense",
+        #     "model": "pritamdeka/S-PubMedBert-MS-MARCO",
+        #     "max_length": 512,
+        # },
         # "roberta": {
         #     "type": "dense",
         #     "model": "sentence-transformers/stsb-roberta-base-v2",
@@ -197,7 +205,6 @@ if __name__ == "__main__":
     qrels_dict = {}
 
     runs = initialise_runs(retriever_configs)
-
     print(f"Processing {len(eval_reviews)} reviews with {len(runs)} runs")
     for index, (review_name, review_data) in enumerate(eval_reviews.items(), start=1):
         collection, qrels = prepare_data(review_data)
