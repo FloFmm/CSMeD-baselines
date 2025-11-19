@@ -140,7 +140,7 @@ if __name__ == "__main__":
 
     eval_reviews = dataset["EVAL"]
 
-    outfile_path = "../../reports/title_and_abstract/"
+    outfile_path = "reports/title_and_abstract/"
     if not os.path.exists(outfile_path):
         os.makedirs(outfile_path)
 
