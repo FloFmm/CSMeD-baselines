@@ -183,11 +183,11 @@ if __name__ == "__main__":
         #     "model": "pritamdeka/BioBERT-mnli-snli-scinli-scitail-mednli-stsb",
         #     "max_length": 512,
         # },
-        "S-BioBert": {
-            "type": "dense",
-            "model": "pritamdeka/S-BioBert-snli-multinli-stsb",
-            "max_length": 512,
-        },
+        # "S-BioBert": {
+        #     "type": "dense",
+        #     "model": "pritamdeka/S-BioBert-snli-multinli-stsb",
+        #     "max_length": 512,
+        # },
         # "pubmedbert": {
         #     "type": "dense",
         #     "model": "pritamdeka/S-PubMedBert-MS-MARCO",

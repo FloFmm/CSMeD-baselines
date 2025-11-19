@@ -115,7 +115,7 @@ def evaluate_runs(
     qrels_dict: dict[str, dict[str, int]],
     outfile: str = "report.tex",
     other_measures_file: str = "other_measures.json",
-    outfile_path: str = "../../reports/title_and_abstract/",
+    outfile_path: str = "reports/title_and_abstract/",
 ) -> None:
     bonferroni_correction = 0.05 / len(runs)
 
