@@ -277,7 +277,7 @@ if __name__ == "__main__":
         "MedCPT": {
             "type": "dense",
             "model": "ncbi/MedCPT-Article-Encoder",
-            # "query_model": "ncbi/MedCPT-Query-Encoder",
+            "query_model": "ncbi/MedCPT-Query-Encoder",
             "max_length": 256,
         },
         # "MiniLM-128": {
