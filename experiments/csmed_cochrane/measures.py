@@ -6,6 +6,7 @@ from ranx import Qrels, Run, compare
 def n_precision_at_recall(
     run: dict[str, dict[str, float]],
     qrels_dict: dict[str, dict[str, int]],
+    total_docs: int,
     recall_level: float = 0.95,
 ) -> float:
     """calculates normalised Precision achieved at a given Recall level.
@@ -19,7 +20,6 @@ def n_precision_at_recall(
         tp, fp, tn, fn = 0, 0, 0, 0
 
         relevant_docs = sum(qrels_dict[query_id].values())
-        total_docs = len(qrels_dict[query_id])
         non_relevant_docs = total_docs - relevant_docs
 
         for rank, (doc_id, _) in enumerate(rankings.items()):
@@ -47,6 +47,7 @@ def n_precision_at_recall(
 def tnr_at_recall(
     run: dict[str, dict[str, float]],
     qrels_dict: dict[str, dict[str, int]],
+    total_docs: int,
     recall_level: float = 0.95,
 ) -> float:
     """calculates the True Negative Rate achieved at a given Recall level.
@@ -58,7 +59,6 @@ def tnr_at_recall(
         tp, fp, tn, fn = 0, 0, 0, 0
 
         relevant_docs = sum(qrels_dict[query_id].values())
-        total_docs = len(qrels_dict[query_id])
         non_relevant_docs = total_docs - relevant_docs
 
         for rank, (doc_id, _) in enumerate(rankings.items()):
@@ -113,6 +113,7 @@ def find_last_relevant(
 def evaluate_runs(
     runs: dict[str, dict[str, dict[str, float]]],
     qrels_dict: dict[str, dict[str, int]],
+    total_docs: int,
     outfile: str = "report.tex",
     other_measures_file: str = "other_measures.json",
     outfile_path: str = "reports/title_and_abstract/",
@@ -137,10 +138,12 @@ def evaluate_runs(
             "recall@10",
             "recall@50",
             "recall@100",
+            "recall@1000",
             "precision",
             "precision@10",
             "precision@50",
             "precision@100",
+            "precision@1000",
             "f1",
             "f1@10",
             "f1@50",
@@ -168,16 +171,16 @@ def evaluate_runs(
             run=run, qrels_dict=qrels_dict
         )
         other_measures["tnr@95"][run_name] = tnr_at_recall(
-            run=run, qrels_dict=qrels_dict, recall_level=0.95
+            run=run, qrels_dict=qrels_dict, total_docs=total_docs, recall_level=0.95
         )
         other_measures["tnr@90"][run_name] = tnr_at_recall(
-            run=run, qrels_dict=qrels_dict, recall_level=0.90
+            run=run, qrels_dict=qrels_dict, total_docs=total_docs, recall_level=0.90
         )
         other_measures["n_precision@95"][run_name] = n_precision_at_recall(
-            run=run, qrels_dict=qrels_dict, recall_level=0.95
+            run=run, qrels_dict=qrels_dict, total_docs=total_docs, recall_level=0.95
         )
         other_measures["n_precision@80"][run_name] = n_precision_at_recall(
-            run=run, qrels_dict=qrels_dict, recall_level=0.80
+            run=run, qrels_dict=qrels_dict, total_docs=total_docs, recall_level=0.80
         )
         # other_measures["dataset_size"][run_name] = []
     print(other_measures)
