@@ -10,15 +10,15 @@ from typing import Any
 import numpy as np
 import torch
 from numba import njit
-from retriv import SparseRetriever, DenseRetriever, Encoder
-from retriv.dense_retriever.dense_retriever import compute_scores, compute_scores_multi
 from typing import List, Dict, Any
 import sys
 
 # Add path to the parent repo (systematic-review-datasets)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..", "../systematic-review-datasets")))
 from csmed.csmed.csmed_cochrane import CSMeDCochrane
-from measures import evaluate_runs
+from measures import evaluate_model
+from modified_dense_retriever import ModifiedDenseRetriever
+from retriv import SparseRetriever
 
 # Constants
 os.environ["RETRIV_BASE_PATH"] = "../systematic-review-datasets/data/indexes" # has to be down here
@@ -31,80 +31,7 @@ torch.manual_seed(SEED)
 random.seed(SEED)
 np.random.seed(SEED)
 
-class DenseRetrieverWithQueryEncoder(DenseRetriever):
-    def __init__(self, query_model=None, **kwargs):
-        """
-        Args:
-            query_model: str or Encoder object for encoding queries.
-            kwargs: passed to original DenseRetriever (document encoder)
-        """
-        super().__init__(**kwargs)
 
-        if isinstance(query_model, str):
-            # Wrap string path in Encoder like the doc encoder
-            self.query_encoder = Encoder(
-                index_name=self.index_name + "_query",
-                model=query_model,
-                normalize=self.normalize,
-                max_length=self.max_length,
-            )
-        else:
-            self.query_encoder = query_model
-
-    def search(
-        self,
-        query: str,
-        return_docs: bool = True,
-        cutoff: int = 100,
-    ) -> List:
-        """Override search to use query_encoder instead of doc encoder for queries."""
-
-        encoded_query = self.query_encoder(query)
-
-        if self.use_ann:
-            doc_ids, scores = self.ann_searcher.search(encoded_query, cutoff)
-        else:
-            if self.embeddings is None:
-                self.load_embeddings()
-            doc_ids, scores = compute_scores(encoded_query, self.embeddings, cutoff)
-
-        doc_ids = self.map_internal_ids_to_original_ids(doc_ids)
-
-        return (
-            self.prepare_results(doc_ids, scores)
-            if return_docs
-            else dict(zip(doc_ids, scores))
-        )
-
-
-    def msearch(
-        self,
-        queries: List[Dict[str, str]],
-        cutoff: int = 100,
-        batch_size: int = 32,
-    ) -> Dict:
-        """Override multi-search to use query_encoder."""
-
-        q_ids = [x["id"] for x in queries]
-        q_texts = [x["text"] for x in queries]
-        encoded_queries = self.query_encoder(q_texts, batch_size, show_progress=False)
-
-        if self.use_ann:
-            doc_ids, scores = self.ann_searcher.msearch(encoded_queries, cutoff)
-        else:
-            if self.embeddings is None:
-                self.load_embeddings()
-            doc_ids, scores = compute_scores_multi(
-                encoded_queries, self.embeddings, cutoff
-            )
-
-        doc_ids = [
-            self.map_internal_ids_to_original_ids(_doc_ids) for _doc_ids in doc_ids
-        ]
-
-        results = {q: dict(zip(doc_ids[i], scores[i])) for i, q in enumerate(q_ids)}
-
-        return {q_id: results[q_id] for q_id in q_ids}
 
 @njit
 def set_seed(value):
@@ -118,55 +45,44 @@ def load_dataset():
     )
 
 
-def create_retrievers(configs, collection):
-    retrievers = {}
-    for name, conf in configs.items():
-        index_name = f"{name}_{conf['type']}_index_docs={len(collection)}"
-        if conf["type"] == "sparse":
-            if os.path.exists(f"{os.environ['RETRIV_BASE_PATH']}/collections/{index_name}"):
-                print(f"Loading existing index: {index_name}")
-                retrievers[name] = SparseRetriever.load(index_name)
+def create_retriever(name, conf, collection):
+    index_name = f"{name}_{conf['type']}_index_docs={len(collection)}"
+    if conf["type"] == "sparse":
+        if os.path.exists(f"{os.environ['RETRIV_BASE_PATH']}/collections/{index_name}/dr_state.npz"):
+            print(f"Loading existing index: {index_name}")
+            retriever = SparseRetriever.load(index_name)
 
-            else:
-                retrievers[name] = SparseRetriever(
-                    index_name=index_name,
-                    model=conf["model"],
-                    min_df=1,
-                    tokenizer="whitespace",
-                    stemmer="english",
-                    stopwords="english",
-                    do_lowercasing=True,
-                    do_ampersand_normalization=True,
-                    do_special_chars_normalization=True,
-                    do_acronyms_normalization=True,
-                    do_punctuation_removal=True,
-                )
-                retrievers[name].index(collection)
-        elif conf["type"] == "dense":
-            if os.path.exists(f"{os.environ['RETRIV_BASE_PATH']}/collections/{index_name}"):
-                print(f"Loading existing index: {index_name}")
-                retrievers[name] = DenseRetriever.load(index_name)
-            else:
-                if "query_model" in conf:
-                    retrievers[name] = DenseRetrieverWithQueryEncoder(
-                        index_name=index_name,
-                        model=conf["model"],
-                        query_model=conf["query_model"],
-                        normalize=True,
-                        max_length=conf["max_length"],
-                        use_ann=True,
-                    )
-                else:
-                    retrievers[name] = DenseRetriever(
-                        index_name=index_name,
-                        model=conf["model"],
-                        normalize=True,
-                        max_length=conf["max_length"],
-                        use_ann=True,
-                    )
-                retrievers[name].index(collection, use_gpu=USE_GPU, batch_size=128)
+        else:
+            retriever = SparseRetriever(
+                index_name=index_name,
+                model=conf["model"],
+                min_df=1,
+                tokenizer="whitespace",
+                stemmer="english",
+                stopwords="english",
+                do_lowercasing=True,
+                do_ampersand_normalization=True,
+                do_special_chars_normalization=True,
+                do_acronyms_normalization=True,
+                do_punctuation_removal=True,
+            )
+            retriever.index(collection)
+    elif conf["type"] == "dense":
+        if os.path.exists(f"{os.environ['RETRIV_BASE_PATH']}/collections/{index_name}/dr_state.npz"):
+            print(f"Loading existing index: {index_name}")
+            retriever = ModifiedDenseRetriever.load(index_name)
+        else:
+            retriever = ModifiedDenseRetriever(
+                index_name=index_name,
+                model=conf["model"],
+                query_model=conf["query_model"] if "query_model" in conf and conf["query_model"] != conf["model"] else None,
+                normalize=True,
+                max_length=conf["max_length"],
+                use_ann=False,
+            )
+            retriever.index(collection, use_gpu=USE_GPU, batch_size=128)
             
-    return retrievers
+    return retriever
 
 
 def extract_review_details(review_data):
@@ -189,22 +105,6 @@ def extract_review_details(review_data):
     return review_details
 
 
-def prepare_data(review_data):
-    # Extracting documents for indexing
-    collection = [
-        {"id": doc["document_id"], "text": doc["text"]}
-        for doc in review_data["data"]["train"]
-    ]
-
-    # Extracting relevance judgments (qrels)
-    qrels = {
-        doc["document_id"]: int(doc["labels"][0])
-        for doc in review_data["data"]["train"]
-    }
-
-    return collection, qrels
-
-
 def build_global_corpus(dataset):
     """
     Build a global corpus containing all documents from all splits and all reviews,
@@ -222,49 +122,37 @@ def build_global_corpus(dataset):
 
     # Convert to list of dicts for retriever
     collection = [{"id": doc_id, "text": text} for doc_id, text in doc_dict.items()]
-    # collection = collection[:1000]
+    # collection = collection[:1001]
     return collection
 
 
-def initialise_runs(retriever_configs: dict[str, dict[str, str]]) -> dict[str, Any]:
-    runs = {}
-    for retriever_name in retriever_configs.keys():
-        for query_type in QUERY_TYPES:
-            run_key = f"{retriever_name}_{query_type}"
-            runs[run_key] = {}
-    return runs
-
-
 def process_review(
-    retrievers,
+    model_name: str,
+    retriever,
     review_data,
-    runs: dict[str, dict[str, dict[str, float]]],
     cutoff: int,
     review_name: str,
 ):
     review_details = extract_review_details(review_data)
 
-    for model_name, retriever in retrievers.items():
-        for slr_protocol_key, slr_protocol_value in review_details.items():
-            if slr_protocol_key not in QUERY_TYPES:
-                continue
-            run_key = f"{model_name}_{slr_protocol_key}"
-            runs[run_key][review_name] = retriever.search(
-                query=slr_protocol_value, cutoff=cutoff, return_docs=False
-            )
+    for query_type, query in review_details.items():
+        if query_type not in QUERY_TYPES:
+            continue
+        
+        ranking = retriever.search(
+            query=query, cutoff=cutoff, return_docs=False
+        ) # returns (doc_ids, score) pairs
+        base_dir = f"../systematic-review-datasets/data/rankings/{model_name}/{query_type}/docs={total_docs}"
+        os.makedirs(base_dir, exist_ok=True)
+        doc_ids = np.array(list(ranking.keys()), dtype="U64")
+        scores = np.array(list(ranking.values()), dtype=np.float32)
+
+        outpath = f"{base_dir}/{review_name}.npz"
+        np.savez_compressed(outpath, ids=doc_ids, scores=scores)
 
 
 if __name__ == "__main__":
     set_seed(SEED)
-
-    dataset = load_dataset()
-    
-    eval_reviews = dataset["EVAL"]
-
-    outfile_path = "reports/title_and_abstract/"
-    if not os.path.exists(outfile_path):
-        os.makedirs(outfile_path)
-
     retriever_configs = {
         # "bm25": {
         #     "type": "sparse",
@@ -280,11 +168,16 @@ if __name__ == "__main__":
             "query_model": "ncbi/MedCPT-Query-Encoder",
             "max_length": 256,
         },
-        # "MiniLM-128": {
-        #     "type": "dense",
-        #     "model": "sentence-transformers/all-MiniLM-L6-v2",
-        #     "max_length": 128,
-        # },
+        "MedCPT-Doc-Enc-Only": {
+            "type": "dense",
+            "model": "ncbi/MedCPT-Article-Encoder",
+            "max_length": 256,
+        },
+        "MiniLM-128": {
+            "type": "dense",
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+            "max_length": 128,
+        },
         # "MiniLM-256": {
         #     "type": "dense",
         #     "model": "sentence-transformers/all-MiniLM-L6-v2",
@@ -315,11 +208,11 @@ if __name__ == "__main__":
         #     "model": "pritamdeka/S-BioBert-snli-multinli-stsb",
         #     "max_length": 512,
         # },
-        # "pubmedbert": {
-        #     "type": "dense",
-        #     "model": "pritamdeka/S-PubMedBert-MS-MARCO",
-        #     "max_length": 512,
-        # },
+        "pubmedbert": {
+            "type": "dense",
+            "model": "pritamdeka/S-PubMedBert-MS-MARCO",
+            "max_length": 512,
+        },
         # "roberta": {
         #     "type": "dense",
         #     "model": "sentence-transformers/stsb-roberta-base-v2",
@@ -328,41 +221,56 @@ if __name__ == "__main__":
     }
 
     dataset = load_dataset()
+    # mini dataset
+    # max_items = 20
+    # mini_dataset = {"EVAL":{}}
+    # count = 0
+    # for review_name, review_data in dataset["EVAL"].items():
+    #     mini_dataset["EVAL"][review_name] = review_data
+    #     count += 1
+    #     if count >= max_items:
+    #         break
+
+    # dataset = mini_dataset
+    # mini dataset
+    eval_reviews = dataset["EVAL"]
     global_corpus = build_global_corpus(dataset)
-    total_docs = len(global_corpus)
-    retrievers = create_retrievers(retriever_configs, collection=global_corpus)
     
+    total_docs = len(global_corpus)
     for split, reviews in dataset.items():
         print(f"\n=== Split: {split} ===")
         print(f"Number of reviews: {len(reviews)}")
+    print("total_docs:", total_docs)
+    for name, conf in retriever_configs.items():
+        print("Processing model:", name)
+        retriever = create_retriever(name, conf, collection=global_corpus)
 
-    eval_reviews = dataset["EVAL"]
-    qrels_dict = {}
-    
-    runs = initialise_runs(retriever_configs)
-    print(f"Processing {len(eval_reviews)} reviews with {len(runs)} runs")
-    for index, (review_name, review_data) in enumerate(eval_reviews.items(), start=1):
-        qrels = {
-            doc["document_id"]: int(doc["labels"][0])
-            for doc in review_data["data"]["train"]
-        }
+        qrels_dict = {}
+        
+        for index, (review_name, review_data) in enumerate(eval_reviews.items(), start=1):
+            qrels = {
+                doc["document_id"]: int(doc["labels"][0])
+                for doc in review_data["data"]["train"]
+            }
 
-        qrels_dict[review_name] = qrels
+            qrels_dict[review_name] = qrels
 
-        process_review(
-            retrievers,
-            review_data,
-            runs,
-            cutoff=5000,
-            review_name=review_name,
-        )
-        if index % 10 == 0:
-            evaluate_runs(runs=runs, qrels_dict=qrels_dict, total_docs=total_docs)
+            process_review(
+                name,
+                retriever,
+                review_data,
+                cutoff=10_000,
+                review_name=review_name,
+            )
 
-            with open(f"{outfile_path}/runs.pkl", "wb") as f:
-                pickle.dump(runs, f)
+        for query_type in QUERY_TYPES:
+            evaluate_model(
+                model_name=name,
+                query_type=query_type,
+                total_docs=total_docs,
+                qrels_dict=qrels_dict,
+                output_dir = "reports/title_and_abstract",
+                rankings_base_path = "../systematic-review-datasets/data/rankings"
+            )
 
-    evaluate_runs(runs=runs, qrels_dict=qrels_dict, total_docs=total_docs)
-    with open(f"{outfile_path}/runs.pkl", "wb") as f:
-        pickle.dump(runs, f)
 
